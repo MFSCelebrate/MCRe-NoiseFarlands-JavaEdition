@@ -20,8 +20,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.util.Mth;
 import net.minecraft.util.Util;
@@ -90,13 +90,13 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
         final BlockState fluidBlock;
         final WorldMainSettingScreen.FarLandsConfigData cfg = WorldMainSettingScreen.FarLandsConfigData.activeConfig;
         if (cfg != null && cfg.replaceUndergroundLava) {
-            lavaBlock = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(cfg.replaceUndergroundLavaBlock))
+            lavaBlock = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(cfg.replaceUndergroundLavaBlock))
                     .map(Block::defaultBlockState).orElse(Blocks.LAVA.defaultBlockState());
         } else {
             lavaBlock = Blocks.LAVA.defaultBlockState();
         }
         if (cfg != null && cfg.replaceDefaultFluid) {
-            fluidBlock = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(cfg.replaceDefaultFluidBlock))
+            fluidBlock = BuiltInRegistries.BLOCK.getOptional(Identifier.parse(cfg.replaceDefaultFluidBlock))
                     .map(Block::defaultBlockState).orElse(settings.defaultFluid());
         } else {
             fluidBlock = settings.defaultFluid();
