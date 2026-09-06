@@ -19,7 +19,9 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.util.Mth;
 import net.minecraft.util.Util;
@@ -33,11 +35,13 @@ import net.minecraft.world.level.biome.BiomeGenerationSettings;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeResolver;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.CarvingMask;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.client.gui.screens.worldselection.WorldMainSettingScreen;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.dimension.DimensionType;
@@ -79,8 +83,27 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
             lavaLevelY = -54;
             seaLevelY = settings.seaLevel();
         }
-        Aquifer.FluidStatus lavaStatus = new Aquifer.FluidStatus(lavaLevelY, Blocks.LAVA.defaultBlockState());
-        Aquifer.FluidStatus seaStatus = new Aquifer.FluidStatus(seaLevelY, settings.defaultFluid());
+
+        // 🔧 MCRe：流体替换（UltimateScaler FluidReplace 移植）——玩家可自定义海平面流体 + 地底熔岩
+        // getOptional 区分"无效 id"和"故意 air"（玩家可主动替换为 air 把海变成空气）
+        final BlockState lavaBlock;
+        final BlockState fluidBlock;
+        final WorldMainSettingScreen.FarLandsConfigData cfg = WorldMainSettingScreen.FarLandsConfigData.activeConfig;
+        if (cfg != null && cfg.replaceUndergroundLava) {
+            lavaBlock = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(cfg.replaceUndergroundLavaBlock))
+                    .map(Block::defaultBlockState).orElse(Blocks.LAVA.defaultBlockState());
+        } else {
+            lavaBlock = Blocks.LAVA.defaultBlockState();
+        }
+        if (cfg != null && cfg.replaceDefaultFluid) {
+            fluidBlock = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(cfg.replaceDefaultFluidBlock))
+                    .map(Block::defaultBlockState).orElse(settings.defaultFluid());
+        } else {
+            fluidBlock = settings.defaultFluid();
+        }
+
+        Aquifer.FluidStatus lavaStatus = new Aquifer.FluidStatus(lavaLevelY, lavaBlock);
+        Aquifer.FluidStatus seaStatus = new Aquifer.FluidStatus(seaLevelY, fluidBlock);
         Aquifer.FluidStatus emptyStatus = new Aquifer.FluidStatus(DimensionType.MIN_Y, Blocks.AIR.defaultBlockState());
         return (x, y, z) -> {
             if (SharedConstants.DEBUG_DISABLE_FLUID_GENERATION) {

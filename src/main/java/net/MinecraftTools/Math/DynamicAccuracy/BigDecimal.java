@@ -608,13 +608,34 @@ public class BigDecimal extends Number implements Comparable<BigDecimal> {
             throw new NumberFormatException("Infinite or NaN");
         }
 
-        // 🔧 MCRe：整数 double 快路径——绕过字符串，直接 long 精确转换（零 GC，快 5-10 倍）
-        // 注意：0.0/-0.0 走字符串路径，保持原语义（scale=1 的 "0.0"）
-        if (val != 0.0 && val == Math.rint(val) && Math.abs(val) < 9007199254740992.0) { // |val| < 2^53
-            return BigDecimal.valueOf((long) val);
+        // 0.0/-0.0 走字符串路径，保持原语义（scale=1 的 "0.0"）
+        if (val == 0.0) {
+            return new BigDecimal(Double.toString(val));
         }
 
-        // 🔧 修复：原实现 Math.abs(val) 会丢失负号（valueOf(-1.5) 曾错误返回 1.5）
+        // 🔧 MCRe：整数 double 走 IEEE 754 位精确转换，绕开 Double.toString 的科学记数法截断
+        // 问题：Double.toString 对大整数用科学记数法只保留 17 位有效数字
+        //      例如 Double.toString(9223372036854775808.0) = "9.223372036854776E18"（最后 4 位丢失）
+        //      导致 BigDecimal 偏移缩放全链路（如 WorldReposition/DebugEntryPosition）在地形坐标 ≥ 2^53 时精度崩盘
+        // 解决：位解析路径 sign × significand × 2^scaleExp 精确重建，对任意大小整数 double 都精确
+        if (val == Math.rint(val)) {
+            long bits = Double.doubleToRawLongBits(val);
+            boolean neg = (bits >>> 63) != 0;
+            int expBits = (int) ((bits >>> 52) & 0x7FF);
+            long mantBits = bits & 0xFFFF_FFFFFFFFL;
+            long significand = mantBits | (1L << 52);  // 53-bit 含隐含位，long 范围
+            int scaleExp = expBits - 1075;              // 值 = sign × significand × 2^scaleExp
+            BigInteger mant = BigInteger.valueOf(neg ? -significand : significand);
+            if (scaleExp >= 0) {
+                return new BigDecimal(mant.shiftLeft(scaleExp));
+            } else {
+                // 整数 double 的 scaleExp 实际 ≥ 0（次正规不进整数分支），此分支仅作防御
+                BigInteger denom = BigInteger.valueOf(2).pow(-scaleExp);
+                return new BigDecimal(mant).divide(new BigDecimal(denom));
+            }
+        }
+
+        // 小数 double：Double.toString 无损（17 位有效数字是 double 自身精度上限）
         String ds = Double.toString(val);
         return new BigDecimal(ds);
     }

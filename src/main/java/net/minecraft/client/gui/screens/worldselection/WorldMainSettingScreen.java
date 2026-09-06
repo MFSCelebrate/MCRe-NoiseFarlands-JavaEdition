@@ -60,6 +60,10 @@ public class WorldMainSettingScreen extends Screen {
     private @Nullable EditBox yWorldOffsetInput;
     private @Nullable EditBox zWorldOffsetInput;
 
+    // 🔧 MCRe：第二页「流体替换」方块 ID 输入框引用——开关启用时显示，关闭时收起
+    private @Nullable EditBox replaceDefaultFluidBlockInput;
+    private @Nullable EditBox replaceUndergroundLavaBlockInput;
+
     // ==================== 分页状态 ====================
     /** 当前页码（0 起），进入界面默认为第一页 */
     private int currentPage = 0;
@@ -107,11 +111,10 @@ public class WorldMainSettingScreen extends Screen {
 
         // 底部按钮：上一页 + 完成 + 取消 + 下一页
         LinearLayout footer = this.layout.addToFooter(LinearLayout.horizontal().spacing(8));
-        // 🔧 MCRe：换页按钮缩小到原默认(150×20)的四分之一面积 → 75×10（各维度减半）
         this.prevPageButton = footer.addChild(Button.builder(
                 Component.literal("<="),
                 button -> this.switchPage(-1)
-        ).size(75, 10).build());
+        ).size(75, 20).build());
         footer.addChild(Button.builder(
                 Component.literal("完成"),
                 button -> this.onDone()
@@ -123,7 +126,7 @@ public class WorldMainSettingScreen extends Screen {
         this.nextPageButton = footer.addChild(Button.builder(
                 Component.literal("=>"),
                 button -> this.switchPage(1)
-        ).size(75, 10).build());
+        ).size(75, 20).build());
 
         // 统一注册所有组件
         this.layout.visitWidgets(x$0 -> this.addRenderableWidget(x$0));
@@ -195,7 +198,7 @@ public class WorldMainSettingScreen extends Screen {
         // 3. 启用天空网格（开关）
         SwitchGrid.Builder skyGridBuilder = SwitchGrid.builder(CONTENT_WIDTH - 20)
                 .withRowSpacing(4)
-                .withInfoUnderneath(2, true);
+                .withInfoUnderneath(4, true);
         skyGridBuilder.addSwitch(
                 Component.literal("启用天空网格"),
                 () -> this.configData.enableSkyGrid,
@@ -294,7 +297,7 @@ public class WorldMainSettingScreen extends Screen {
 
         SwitchGrid.Builder fcBuilder = SwitchGrid.builder(CONTENT_WIDTH - 20)
                 .withRowSpacing(3)
-                .withInfoUnderneath(2, false);
+                .withInfoUnderneath(4, false);
         fcBuilder.addSwitch(
                 Component.literal("扩展数据包密度函数字面量限制"),
                 () -> this.configData.expandDatapackValueRange,
@@ -436,9 +439,58 @@ public class WorldMainSettingScreen extends Screen {
         ));
         this.scrollContent.addChild(yGradientBuilder.build().layout(), s -> s.paddingHorizontal(10));
 
+        // ========== 第四节：流体替换 ==========
+        // 🔧 MCRe：UltimateScaler FluidReplace 移植——玩家可自定义海平面流体 + 地底熔岩
+        this.scrollContent.addChild(this.createSectionHeader(
+                Component.literal("§a§l含水层与岩浆层")
+        ));
+        
+        SwitchGrid.Builder fluidReplaceBuilder = SwitchGrid.builder(CONTENT_WIDTH - 20)
+                .withRowSpacing(4);
+        fluidReplaceBuilder.addSwitch(
+                Component.literal("替换默认流体（海平面以下）"),
+                () -> this.configData.replaceDefaultFluid,
+                val -> {
+                    this.configData.replaceDefaultFluid = val;
+                    this.setFluidReplaceInputsVisible();
+                }
+        ).withInfo(Component.literal(
+                "启用后，原版海平面以下的默认流体（水）将被替换为指定的方块。\n"
+                        + "§e典型用途：§r把海变成空气（minecraft:air）或自定义流体\n"
+                        + "§c[警告] §r方块 ID 必须合法（namespace:path 格式），否则回退到默认流体"
+        ));
+        fluidReplaceBuilder.addSwitch(
+                Component.literal("替换地底熔岩（Y=-54）"),
+                () -> this.configData.replaceUndergroundLava,
+                val -> {
+                    this.configData.replaceUndergroundLava = val;
+                    this.setFluidReplaceInputsVisible();
+                }
+        ).withInfo(Component.literal(
+                "启用后，原版地底熔岩层（Y=-54）的熔岩将被替换为指定的方块。\n"
+                        + "§e典型用途：§r把地下熔岩变成空气（避免误伤）或自定义方块\n"
+                        + "§c[警告] §r方块 ID 必须合法（namespace:path 格式），否则回退到熔岩"
+        ));
+        this.scrollContent.addChild(fluidReplaceBuilder.build().layout(), s -> s.paddingHorizontal(10));
+
+        // 方块 ID 输入框（开关启用时显示，关闭时收起）
+        this.replaceDefaultFluidBlockInput = this.createStringInput(
+                Component.literal("默认流体方块 ID（namespace:path）"),
+                this.configData.replaceDefaultFluidBlock,
+                val -> this.configData.replaceDefaultFluidBlock = val
+        );
+        this.replaceUndergroundLavaBlockInput = this.createStringInput(
+                Component.literal("地底熔岩方块 ID（namespace:path）"),
+                this.configData.replaceUndergroundLavaBlock,
+                val -> this.configData.replaceUndergroundLavaBlock = val
+        );
+        this.scrollContent.addChild(this.replaceDefaultFluidBlockInput);
+        this.scrollContent.addChild(this.replaceUndergroundLavaBlockInput);
+
         // 根据开关状态初始化输入框显隐（页面切换后重新构建时生效）
         this.setScalerInputsVisible(this.configData.enabledTerrainScaler);
         this.setOffsetInputsVisible(this.configData.enabledTerrainOffsets);
+        this.setFluidReplaceInputsVisible();
     }
 
     // ============ 第二页 helper：联动显隐 ============
@@ -505,6 +557,34 @@ public class WorldMainSettingScreen extends Screen {
             }
         });
         return box;
+    }
+
+    /**
+     * 🔧 MCRe：通用字符串输入框——不限字符集（用于方块 ID "namespace:path" 等），
+     * 移除 EditBox 默认 maxLength=32 限制，setResponder 直接写原值到 configData。
+     * 运行时解析失败由调用方处理（如 {@code BuiltInRegistries.BLOCK.getOptional} 返回空时回退）。
+     */
+    private EditBox createStringInput(final Component narration, final String initialValue, final Consumer<String> onValueChange) {
+        final EditBox box = new EditBox(this.font, 0, 0, CONTENT_WIDTH, 20, narration);
+        box.setMaxLength(Integer.MAX_VALUE);
+        box.setValue(initialValue);
+        box.setResponder(onValueChange::accept);
+        return box;
+    }
+
+    /** 🔧 MCRe：流体替换开关 → 两个方块 ID 输入框同步显隐（仿 setOffsetInputsVisible 模式） */
+    private void setFluidReplaceInputsVisible() {
+        final boolean fluidVisible = this.configData.replaceDefaultFluid;
+        final boolean lavaVisible = this.configData.replaceUndergroundLava;
+        if (this.replaceDefaultFluidBlockInput != null) {
+            this.replaceDefaultFluidBlockInput.setVisible(fluidVisible);
+            this.replaceDefaultFluidBlockInput.setHeight(fluidVisible ? 20 : 0);
+        }
+        if (this.replaceUndergroundLavaBlockInput != null) {
+            this.replaceUndergroundLavaBlockInput.setVisible(lavaVisible);
+            this.replaceUndergroundLavaBlockInput.setHeight(lavaVisible ? 20 : 0);
+        }
+        this.repositionElements();
     }
 
     // ==================== 分页逻辑 ====================
@@ -680,6 +760,12 @@ public class WorldMainSettingScreen extends Screen {
         public boolean expandNoiseValueRetrievalLimit = true;
         public boolean allowIllegalValuePlayerPosition = true;
         public boolean simulatedWraparoundOverflow = false;
+
+        // 🔧 MCRe：流体替换（UltimateScaler FluidReplace 移植）——玩家可自定义海平面流体 + 地底熔岩
+        public boolean replaceDefaultFluid = false;
+        public String replaceDefaultFluidBlock = "minecraft:air";
+        public boolean replaceUndergroundLava = false;
+        public String replaceUndergroundLavaBlock = "minecraft:air";
 
         public boolean disabledStructureSpawn = false;
         public boolean disabledEntitySpawn = false;

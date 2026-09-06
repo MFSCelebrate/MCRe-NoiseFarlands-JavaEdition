@@ -582,7 +582,15 @@ public final class DensityFunctions {
             int subSectionZ = offsetZ.divide(EIGHT).remainder(TWO).intValue();
             float doffs;
             if (fixEndRingMode()) {
-                doffs = 100.0F - Mth.sqrt((float) sectionX * (float) sectionX + (float) sectionZ * (float) sectionZ) * 8.0F;
+                // 🔧 MCRe：BigInteger 路径，无 int 溢出 + 应用 WorldReposition 偏移缩放
+                // 公式：sqrtArg = (reposition(sectionX) / 8)² + (reposition(sectionZ) / 8)²
+                // /8 还原 sectionX/8 域（与 chunkX*2 一致）；BigInteger.multiply 无溢出
+                final BigInteger sqrtOffsetX = WorldReposition.reposition(BigDecimal.valueOf(sectionX), Direction.Axis.X).toBigInteger();
+                final BigInteger sqrtOffsetZ = WorldReposition.reposition(BigDecimal.valueOf(sectionZ), Direction.Axis.Z).toBigInteger();
+                final BigInteger sx8 = sqrtOffsetX.divide(EIGHT);
+                final BigInteger sz8 = sqrtOffsetZ.divide(EIGHT);
+                final BigInteger sumSq = sx8.multiply(sx8).add(sz8.multiply(sz8));
+                doffs = 100.0F - Mth.sqrt(sumSq.floatValue()) * 8.0F;
             } else {
                 doffs = 100.0F - Mth.sqrt(sectionX * sectionX + sectionZ * sectionZ) * 8.0F;
             }
