@@ -442,13 +442,16 @@ public class WorldMainSettingScreen extends Screen {
 
         // ========== 第四节：流体替换 ==========
         // 🔧 MCRe：UltimateScaler FluidReplace 移植——玩家可自定义海平面流体 + 地底熔岩
+        // 每个开关下方紧跟对应方块 ID 输入框（开关关闭时输入框隐藏）
         this.scrollContent.addChild(this.createSectionHeader(
                 Component.literal("§a§l含水层与岩浆层")
         ));
-        
-        SwitchGrid.Builder fluidReplaceBuilder = SwitchGrid.builder(CONTENT_WIDTH - 20)
+
+        // 组 1：替换默认流体（按钮 + 下方输入框）
+        LinearLayout fluidReplaceGroup1 = LinearLayout.vertical().spacing(2);
+        SwitchGrid.Builder fluidReplaceBuilder1 = SwitchGrid.builder(CONTENT_WIDTH - 20)
                 .withRowSpacing(4);
-        fluidReplaceBuilder.addSwitch(
+        fluidReplaceBuilder1.addSwitch(
                 Component.literal("替换默认流体（海平面以下）"),
                 () -> this.configData.replaceDefaultFluid,
                 val -> {
@@ -460,7 +463,20 @@ public class WorldMainSettingScreen extends Screen {
                         + "§e典型用途：§r把海变成空气（minecraft:air）或自定义流体\n"
                         + "§c[警告] §r方块 ID 必须合法（namespace:path 格式），否则回退到默认流体"
         ));
-        fluidReplaceBuilder.addSwitch(
+        fluidReplaceGroup1.addChild(fluidReplaceBuilder1.build().layout());
+        this.replaceDefaultFluidBlockInput = this.createStringInput(
+                Component.literal("默认流体方块 ID（namespace:path）"),
+                this.configData.replaceDefaultFluidBlock,
+                val -> this.configData.replaceDefaultFluidBlock = val
+        );
+        fluidReplaceGroup1.addChild(this.replaceDefaultFluidBlockInput);
+        this.scrollContent.addChild(fluidReplaceGroup1, s -> s.paddingHorizontal(10));
+
+        // 组 2：替换地底熔岩（按钮 + 下方输入框）
+        LinearLayout fluidReplaceGroup2 = LinearLayout.vertical().spacing(2);
+        SwitchGrid.Builder fluidReplaceBuilder2 = SwitchGrid.builder(CONTENT_WIDTH - 20)
+                .withRowSpacing(4);
+        fluidReplaceBuilder2.addSwitch(
                 Component.literal("替换地底熔岩（Y=-54）"),
                 () -> this.configData.replaceUndergroundLava,
                 val -> {
@@ -472,21 +488,14 @@ public class WorldMainSettingScreen extends Screen {
                         + "§e典型用途：§r把地下熔岩变成空气（避免误伤）或自定义方块\n"
                         + "§c[警告] §r方块 ID 必须合法（namespace:path 格式），否则回退到熔岩"
         ));
-        this.scrollContent.addChild(fluidReplaceBuilder.build().layout(), s -> s.paddingHorizontal(10));
-
-        // 方块 ID 输入框（开关启用时显示，关闭时收起）
-        this.replaceDefaultFluidBlockInput = this.createStringInput(
-                Component.literal("默认流体方块 ID（namespace:path）"),
-                this.configData.replaceDefaultFluidBlock,
-                val -> this.configData.replaceDefaultFluidBlock = val
-        );
+        fluidReplaceGroup2.addChild(fluidReplaceBuilder2.build().layout());
         this.replaceUndergroundLavaBlockInput = this.createStringInput(
                 Component.literal("地底熔岩方块 ID（namespace:path）"),
                 this.configData.replaceUndergroundLavaBlock,
                 val -> this.configData.replaceUndergroundLavaBlock = val
         );
-        this.scrollContent.addChild(this.replaceDefaultFluidBlockInput);
-        this.scrollContent.addChild(this.replaceUndergroundLavaBlockInput);
+        fluidReplaceGroup2.addChild(this.replaceUndergroundLavaBlockInput);
+        this.scrollContent.addChild(fluidReplaceGroup2, s -> s.paddingHorizontal(10));
 
         // 根据开关状态初始化输入框显隐（页面切换后重新构建时生效）
         this.setScalerInputsVisible(this.configData.enabledTerrainScaler);
@@ -851,62 +860,64 @@ public class WorldMainSettingScreen extends Screen {
     private static class BigDecimalEditBox extends EditBox {
         private BigDecimalEditBox(final Font font, final int x, final int y, final int width, final int height, final Component narration) {
             super(font, x, y, width, height, narration);
-            // 🔧 MCRe：移除 EditBox 默认 maxLength=32 限制——缩放/偏移值可能需要 1e49 这种长串科学记数法
             this.setMaxLength(Integer.MAX_VALUE);
+        }
+
+        /** 校验在 cursor 位置插入 c 后是否仍为合法科学记数法前缀 */
+        private boolean canInsertAtCursor(final char c) {
+            String v = this.getValue();
+            int cursor = this.getCursorPosition();
+            // 构造插入后的字符串
+            StringBuilder sb = new StringBuilder(v);
+            sb.insert(cursor, c);
+            String candidate = sb.toString();
+            // 快速校验：只含 0-9 . - + e/E，且结构合法
+            // 允许的前缀模式：[数字]* [.]? [数字]* [eE]? [+-]? [数字]*
+            // 逐字符状态机校验
+            boolean hasDigit = false;
+            boolean hasDot = false;
+            boolean hasE = false;
+            boolean eSeen = false;
+            for (int i = 0; i < candidate.length(); i++) {
+                char ch = candidate.charAt(i);
+                if (ch >= '0' && ch <= '9') {
+                    hasDigit = true;
+                    if (eSeen) continue;
+                } else if (ch == '.') {
+                    if (hasDot || hasE) return false;
+                    hasDot = true;
+                } else if (ch == 'e' || ch == 'E') {
+                    if (hasE || !hasDigit) return false; // e 前必须有数字
+                    hasE = true;
+                    eSeen = true;
+                } else if (ch == '-' || ch == '+') {
+                    // 符号只能出现在开头或 e/E 后
+                    if (i != 0 && candidate.charAt(i - 1) != 'e' && candidate.charAt(i - 1) != 'E') return false;
+                } else {
+                    return false; // 非法字符
+                }
+            }
+            // 不能以 . 结尾、不能以 e/E 结尾、不能以 +/- 结尾
+            char last = candidate.charAt(candidate.length() - 1);
+            return last != '.' && last != 'e' && last != 'E' && last != '-' && last != '+';
         }
 
         @Override
         public boolean charTyped(final CharacterEvent event) {
             int codepoint = event.codepoint();
-            // 数字直接放行
-            if (codepoint >= '0' && codepoint <= '9') {
-                return super.charTyped(event);
-            }
-            // 负号仅允许出现在首位且只出现一次
-            if (codepoint == '-' && this.getCursorPosition() == 0 && !this.getValue().contains("-")) {
-                return super.charTyped(event);
-            }
-            // 小数点仅允许出现一次
-            if (codepoint == '.' && !this.getValue().contains(".")) {
-                return super.charTyped(event);
-            }
-            // 科学记数法 e/E 仅允许出现一次，且前一位必须是数字（不能在首位、不能在 e/E 后、不能在 . 后紧接）
-            if ((codepoint == 'e' || codepoint == 'E')
-                    && !this.getValue().contains("e") && !this.getValue().contains("E")) {
-                String v = this.getValue();
-                if (!v.isEmpty()) {
-                    char last = v.charAt(v.length() - 1);
-                    if (last != 'e' && last != 'E' && last != '.' && last != '-') {
-                        return super.charTyped(event);
-                    }
-                }
-            }
-            return false;
+            char c = (char) codepoint;
+            // 只允许 ASCII 可打印字符
+            if (codepoint > 127) return false;
+            return canInsertAtCursor(c) && super.charTyped(event);
         }
 
         @Override
         public void insertText(final String input) {
-            // 过滤粘贴内容：保留数字、小数点、负号（首位）、e/E（不能在首位/不能在 . /e/E/- 后）
             StringBuilder filtered = new StringBuilder();
-            boolean canMinus = !this.getValue().contains("-") && this.getCursorPosition() == 0;
-            boolean canDot = !this.getValue().contains(".");
-            boolean canE = !this.getValue().contains("e") && !this.getValue().contains("E");
             for (int i = 0; i < input.length(); i++) {
                 char c = input.charAt(i);
-                if (c >= '0' && c <= '9') {
+                if (canInsertAtCursor(c)) {
                     filtered.append(c);
-                } else if (c == '-' && canMinus && filtered.length() == 0) {
-                    filtered.append(c);
-                    canMinus = false;
-                } else if (c == '.' && canDot) {
-                    filtered.append(c);
-                    canDot = false;
-                } else if ((c == 'e' || c == 'E') && canE && filtered.length() > 0) {
-                    char last = filtered.charAt(filtered.length() - 1);
-                    if (last != 'e' && last != 'E' && last != '.' && last != '-') {
-                        filtered.append(c);
-                        canE = false;
-                    }
                 }
             }
             super.insertText(filtered.toString());

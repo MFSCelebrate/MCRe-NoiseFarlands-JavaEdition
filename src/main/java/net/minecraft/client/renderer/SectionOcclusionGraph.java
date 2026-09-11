@@ -158,13 +158,13 @@ public class SectionOcclusionGraph {
             this.runPartialUpdate(camera, chunkLoadingRenderState.loadedExpectedChunks);
         }
 
-        // MCRe：等待全量遮挡图更新任务完成（防止并发访问不完整数据结构）
-        if (this.fullUpdateTask != null) {
-            try {
-                this.fullUpdateTask.get();
-            } catch (Exception ignored) {
-                // 任务被中断或执行异常时忽略，避免阻塞主线程
-            }
+        // MCRe 修复：全量遮挡图更新不阻塞主线程。
+        // 原实现用 fullUpdateTask.get() 无限等待后台任务——回头/飞地下时大量区块变化导致
+        // 后台全量重建慢（或 backgroundExecutor 线程池被占满）时，主线程永久冻结 = 卡死无日志。
+        // currentGraph 是 AtomicReference，并发读写原子安全（主线程读到旧/新完整 GraphState），
+        // 无需阻塞等待；任务完成后 needsFrustumUpdate 标志驱动可见性重算。
+        if (this.fullUpdateTask != null && this.fullUpdateTask.isDone()) {
+            this.fullUpdateTask = null;
         }
     }
 

@@ -1,6 +1,5 @@
 package net.MinecraftTools.Math.DynamicAccuracy;
 
-
 import static net.MinecraftTools.Math.DynamicAccuracy.BigInteger.LONG_MASK;
 import java.io.IOException;
 import java.io.InvalidObjectException;
@@ -622,16 +621,16 @@ public class BigDecimal extends Number implements Comparable<BigDecimal> {
             long bits = Double.doubleToRawLongBits(val);
             boolean neg = (bits >>> 63) != 0;
             int expBits = (int) ((bits >>> 52) & 0x7FF);
-            long mantBits = bits & 0xFFFF_FFFFFFFFL;
-            long significand = mantBits | (1L << 52);  // 53-bit 含隐含位，long 范围
-            int scaleExp = expBits - 1075;              // 值 = sign × significand × 2^scaleExp
+            long mantBits = bits & 0x000F_FFFF_FFFF_FFFFL; // 或者 (1L << 52) - 1
+            long significand = mantBits | (1L << 52); // 53-bit 含隐含位，long 范围
+            int scaleExp = expBits - 1075; // 值 = sign × significand × 2^scaleExp
             BigInteger mant = BigInteger.valueOf(neg ? -significand : significand);
             if (scaleExp >= 0) {
                 return new BigDecimal(mant.shiftLeft(scaleExp));
             } else {
-                // 整数 double 的 scaleExp 实际 ≥ 0（次正规不进整数分支），此分支仅作防御
-                BigInteger denom = BigInteger.valueOf(2).pow(-scaleExp);
-                return new BigDecimal(mant).divide(new BigDecimal(denom));
+                // 值 = mant × 5^(-scaleExp) × 10^(scaleExp)，scale = -scaleExp
+                BigInteger unscaled = mant.multiply(BigInteger.valueOf(5).pow(-scaleExp));
+                return new BigDecimal(unscaled, -scaleExp);
             }
         }
 
@@ -2080,6 +2079,7 @@ public class BigDecimal extends Number implements Comparable<BigDecimal> {
         private static final java.lang.reflect.Field intCompactField;
         private static final java.lang.reflect.Field intValField;
         private static final java.lang.reflect.Field scaleField;
+
         static {
             try {
                 intCompactField = BigDecimal.class.getDeclaredField("intCompact");

@@ -7,16 +7,18 @@ import net.MinecraftTools.Math.DynamicAccuracy.MathContext;
 /**
  * Float256 — 有符号 256-bit 浮点数 (IEEE 754 风格)
  *
- * <p>布局: 1 符号 + 79 指数 + 176 尾数，偏置 2^78-1，RN(GRS) 向偶舍入
- * 范围: [-2^(2^77), 2^(2^77)] 精度: 176 bit ≈ 52 位十进制
+ * <p>布局: 1 符号 + 79 指数 + 176 尾数，偏置 2^78-1，RN(GRS) 向偶舍入 范围: [-2^(2^77), 2^(2^77)] 精度: 176 bit ≈ 52
+ * 位十进制
  *
  * <p>位映射（连续）:
+ *
  * <pre>
  *   a = [sign:1][expHi:63]
  *   b = [expLo:16][mantHi:48]
  *   c = [mantMid:64]
  *   d = [mantLo:64]
  * </pre>
+ *
  * 指数 = (expHi &lt;&lt; 16) | expLo (79 bit)，79-bit 运算用 (expHi, expLo) 对手写，零 GC。
  *
  * <p>INF32768 / MCRe NoiseFarlands 项目
@@ -28,10 +30,10 @@ public final class Float256 extends Number implements Comparable<Float256> {
     private static final int MANT_BITS = 176;
     private static final int MANT_IMPLIED = MANT_BITS + 1; // 177（含隐含位）
 
-    private static final long SIGN_MASK = 0x8000_0000_0000_0000L;          // a 的 bit63
-    private static final long EXP_HI_MASK = 0x7FFF_FFFF_FFFF_FFFFL;         // a 低 63 bit
-    private static final long EXP_LO_MASK = 0xFFFF_0000_0000_0000L;         // b 高 16 bit
-    private static final long MANT_HI_MASK = 0x0000_FFFF_FFFF_FFFFL;        // b 低 48 bit
+    private static final long SIGN_MASK = 0x8000_0000_0000_0000L; // a 的 bit63
+    private static final long EXP_HI_MASK = 0x7FFF_FFFF_FFFF_FFFFL; // a 低 63 bit
+    private static final long EXP_LO_MASK = 0xFFFF_0000_0000_0000L; // b 高 16 bit
+    private static final long MANT_HI_MASK = 0x0000_FFFF_FFFF_FFFFL; // b 低 48 bit
 
     // 偏置 2^78-1 = 78 个 1 → (expHi=62 个 1, expLo=16 个 1)
     private static final long BIAS_HI = 0x3FFF_FFFF_FFFF_FFFFL;
@@ -81,11 +83,25 @@ public final class Float256 extends Number implements Comparable<Float256> {
 
     // ═══════════ 字段提取 ═══════════
 
-    private long expHi() { return a & EXP_HI_MASK; }   // 63 bit
-    private long expLo() { return b >>> 48; }           // 16 bit
-    private long mantHi() { return b & MANT_HI_MASK; }  // 48 bit
-    private long mantMid() { return c; }
-    private long mantLo() { return d; }
+    private long expHi() {
+        return a & EXP_HI_MASK;
+    } // 63 bit
+
+    private long expLo() {
+        return b >>> 48;
+    } // 16 bit
+
+    private long mantHi() {
+        return b & MANT_HI_MASK;
+    } // 48 bit
+
+    private long mantMid() {
+        return c;
+    }
+
+    private long mantLo() {
+        return d;
+    }
 
     public int signum() {
         return (a & SIGN_MASK) != 0 ? -1 : 1;
@@ -189,70 +205,205 @@ public final class Float256 extends Number implements Comparable<Float256> {
         return of(Int256.of(value));
     }
 
-    /** 从 Int256（精确） */
+    /**
+     * 从 Int256 转换（GRS 向偶舍入，不直接截断）。 bitLen ≤ 177 时左对齐隐含位；bitLen > 177 时交给 roundAndPack 内部按 shift
+     * 补偿指数。 MIN_VALUE (-2^255) 的 abs 会回绕成位模式 1000...0，需按无符号语义取 bitLen = 256。
+     */
     public static Float256 of(Int256 value) {
         if (value.isZero()) return ZERO;
         boolean neg = value.isNegative();
         Int256 abs = neg ? value.negate() : value;
-        int bitLen = abs.bitLength();
-        // 最高位移到 bit176（隐含位位置）
-        Int256 mant = abs.shiftLeft(MANT_IMPLIED - bitLen);
-        long expHi, expLo;
-        if (bitLen == 1) {
-            expHi = BIAS_HI;
-            expLo = BIAS_LO;
+
+        // MIN_VALUE.negate() 回绕后仍是位模式 1000...0，isNegative() 依然为 true。
+        // 此时 abs 的无符号有效位是 256 位，而 Int256.bitLength() 走补码语义只返回 255。
+        int bitLen;
+        if (neg && abs.isNegative()) {
+            bitLen = 256;
         } else {
-            expHi = 0x4000_0000_0000_0000L; // 2^62 = 2^78 >>> 16
-            expLo = bitLen - 2;
+            bitLen = abs.bitLength();
         }
-        long mantHi = mant.b & MANT_HI_MASK;
-        return make(expHi, expLo, mantHi, mant.c, mant.d, neg ? -1 : 1);
+
+        Int256 mant;
+        long actualExp;
+        if (bitLen <= MANT_IMPLIED) {
+            mant = abs.shiftLeft(MANT_IMPLIED - bitLen);
+            actualExp = bitLen - 1;
+        } else {
+            // bitLen > 177：roundAndPack 会内部右移 shift = bitLen - 177 位并补 exp，
+            // 传入的 exp 必须是 BIAS + 176，不能是 BIAS + (bitLen - 1)
+            mant = abs;
+            actualExp = MANT_IMPLIED - 1; // = 176
+        }
+
+        long offLo = actualExp & 0xFFFFL;
+        long offHi = actualExp >> 16;
+        long eLo = (BIAS_LO + offLo) & 0xFFFFL;
+        long eHi = BIAS_HI + offHi + ((BIAS_LO + offLo) >>> 16);
+
+        return roundAndPack(eHi, eLo, mant, neg ? -1 : 1);
     }
 
-    /** 从 UInt256（精确） */
+    /** 从 UInt256 转换（GRS 向偶舍入，bitLen > 177 时不再截断）。 */
     public static Float256 of(UInt256 value) {
         if (value.isZero()) return ZERO;
         int bitLen = value.bitLength();
-        UInt256 mant = value.shiftLeft(MANT_IMPLIED - bitLen);
+        int shift = bitLen - MANT_IMPLIED; // 需要丢弃的位数
+
         long expHi, expLo;
-        if (bitLen == 1) {
-            expHi = BIAS_HI;
-            expLo = BIAS_LO;
+        UInt256 mant;
+
+        if (shift <= 0) {
+            // 无需舍入：左对齐隐含位到 bit176
+            mant = value.shiftLeft(-shift);
+            // exp 编码 = BIAS + (bitLen - 1)
+            if (bitLen == 1) {
+                expHi = BIAS_HI;
+                expLo = BIAS_LO;
+            } else {
+                expHi = 0x4000_0000_0000_0000L;
+                expLo = bitLen - 2;
+            }
         } else {
-            expHi = 0x4000_0000_0000_0000L;
-            expLo = bitLen - 2;
+            // GRS 向偶舍入
+            long G = value.testBit(shift - 1) ? 1L : 0L;
+            long R = (shift >= 2 && value.testBit(shift - 2)) ? 1L : 0L;
+            long S = 0L;
+            if (shift >= 2) {
+                S = value.and(value.maskBelow(shift - 2)).isZero() ? 0L : 1L;
+            }
+            mant = value.shiftRight(shift);
+            // exp 编码 = BIAS + (bitLen - 1) = BIAS + shift + 176
+            long expVal = BIAS_LO + 176L + shift;
+            expLo = expVal & 0xFFFFL;
+            expHi = BIAS_HI + (expVal >>> 16);
+
+            boolean increment = G == 1 && (R == 1 || S == 1 || mant.lowBit() == 1);
+            if (increment) {
+                mant = mant.add(UInt256.ONE);
+                if (mant.bitLength() > MANT_IMPLIED) {
+                    mant = mant.shiftRight(1);
+                    expLo++;
+                    if (expLo > 0xFFFF) {
+                        expLo = 0;
+                        expHi++;
+                    }
+                }
+            }
+        }
+
+        // 丢弃隐含位，只保留低 176 位
+        mant = mant.and(mant.maskBelow(MANT_BITS));
+
+        if (expHi > EXP_ALL_HI || (expHi == EXP_ALL_HI && expLo >= EXP_ALL_LO)) {
+            return POS_INF;
         }
         return make(expHi, expLo, mant.b & MANT_HI_MASK, mant.c, mant.d, 1);
     }
 
-    /** 从 BigInteger（精确；超 256 bit 时截断高 256 bit 并补偿指数） */
+    /** 从 BigInteger 转换（不再用 Int256 装载，避免 ≥2^255 时符号翻转） */
     public static Float256 of(BigInteger value) {
         if (value.signum() == 0) return ZERO;
         boolean neg = value.signum() < 0;
         BigInteger abs = value.abs();
         int bitLen = abs.bitLength();
+
         if (bitLen <= 256) {
-            Float256 f = of(Int256.of(abs));
+            // 用 UInt256 装载高位，再转 Float256（保留符号）
+            byte[] mag = abs.toByteArray();
+            byte[] buf = new byte[32];
+            if (mag.length > 32) {
+                System.arraycopy(mag, mag.length - 32, buf, 0, 32);
+            } else {
+                System.arraycopy(mag, 0, buf, 32 - mag.length, mag.length);
+            }
+            UInt256 u = UInt256.of(buf);
+            Float256 f = of(u);
             return neg ? f.negate() : f;
         }
-        // 取高 256 bit，指数补偿 bitLen-256
+
+        // bitLen > 256：取高 256 bit 并补偿指数
         Int256 top = Int256.of(abs.shiftRight(bitLen - 256));
-        Float256 f = of(top);
+        // 这里 top 是正数（因为 abs.shiftRight 的最高位仍可能被当负数，
+        // 但当 bitLen > 256 时，取高 256 bit 后最高位是 abs 的 bit(bitLen-1)，仍是 1，
+        // 会被 Int256 当作负——但我们只关心位模式，转入 UInt256 后按无符号处理）
+        UInt256 uTop = UInt256.fromInt256(top);
+        Float256 f = of(uTop);
         if (neg) f = f.negate();
         return f.scaleExp(bitLen - 256);
     }
 
     /** 从 BigDecimal（scale 按 log2(10) 近似调整指数） */
+    /**
+     * 从 BigDecimal 精确转换到 Float256。 值 = unscaled × 10^(-scale)，按 2 的幂次拆分精确计算，最后 GRS 向偶舍入。 修复：原实现用
+     * (long)(scale * log2(10)) 截断，scale=1..3 时相对误差可达 2 倍。
+     */
     public static Float256 of(BigDecimal value) {
         if (value.signum() == 0) return ZERO;
         boolean neg = value.signum() < 0;
-        Float256 f = of(value.unscaledValue().abs());
-        if (neg) f = f.negate();
+        BigInteger unscaled = value.unscaledValue().abs();
         int scale = value.scale();
-        if (scale != 0) {
-            f = f.scaleExp(-(long) (scale * 3.321928094887362)); // * log2(10)
+
+        if (scale == 0) {
+            Float256 f = of(unscaled);
+            return neg ? f.negate() : f;
         }
-        return f;
+
+        if (scale < 0) {
+            // 值为整数：unscaled × 10^|scale|
+            BigInteger intVal = unscaled.multiply(BigInteger.TEN.pow(-scale));
+            Float256 f = of(intVal);
+            return neg ? f.negate() : f;
+        }
+
+        // scale > 0：value = unscaled / 10^scale = unscaled / (2^scale × 5^scale)
+        // 用 q × 2^(-K) 逼近 value，其中 q 约 targetBits 位
+        BigInteger pow10 = BigInteger.TEN.pow(scale);
+        int targetBits = 240;
+        long K = (long) targetBits - unscaled.bitLength() + pow10.bitLength();
+
+        BigInteger num, denom;
+        if (K >= 0) {
+            num = unscaled.shiftLeft((int) K);
+            denom = pow10;
+        } else {
+            // K < 0：值本身远大于 2^240 位，用右移保证除数不出界
+            num = unscaled;
+            denom = pow10.shiftLeft((int) -K);
+        }
+
+        BigInteger[] qr = num.divideAndRemainder(denom);
+        BigInteger q = qr[0];
+        boolean exact = qr[1].signum() == 0;
+
+        if (q.signum() == 0) return ZERO;
+
+        // q 太宽时压缩到 ≤ 250 位（可安全装进 Int256）
+        while (q.bitLength() > 250) {
+            int drop = q.bitLength() - 250;
+            BigInteger low = q.and(BigInteger.ONE.shiftLeft(drop).subtract(BigInteger.ONE));
+            q = q.shiftRight(drop);
+            K -= drop;
+            if (low.signum() != 0) exact = false;
+        }
+
+        // Sticky 位：把余数信息编码进最低位，让 roundAndPack 的 GRS 正确工作
+        BigInteger qSticky = exact ? q.shiftLeft(1) : q.shiftLeft(1).or(BigInteger.ONE);
+        Int256 qInt = Int256.of(qSticky);
+
+        // E = BIAS + 175 - K（K_sticky = K+1，见 roundAndPack 约定）
+        long offset = 175L - K;
+        long offLo = offset & 0xFFFFL;
+        long offHi = offset >> 16;
+        long eLo = (BIAS_LO + offLo) & 0xFFFFL;
+        long eHi = BIAS_HI + offHi + ((BIAS_LO + offLo) >>> 16);
+
+        if (eHi < 0) return ZERO;
+        if (eHi > EXP_ALL_HI || (eHi == EXP_ALL_HI && eLo >= EXP_ALL_LO)) {
+            return neg ? NEG_INF : POS_INF;
+        }
+
+        Float256 result = roundAndPack(eHi, eLo, qInt, 1);
+        return neg ? result.negate() : result;
     }
 
     // ═══════════ 舍入核心 (GRS + RN) ═══════════
@@ -373,7 +524,7 @@ public final class Float256 extends Number implements Comparable<Float256> {
         long dLo = lo1 - lo2;
         long borrow = (dLo < 0) ? 1L : 0L;
         long dHi = hi1 - hi2 - borrow; // 无符号 63-bit 差
-        if (dHi != 0) return 301;      // ≥ 2^16 > 300
+        if (dHi != 0) return 301; // ≥ 2^16 > 300
         long diff = dLo & 0xFFFF;
         return diff > 300 ? 301 : (int) diff;
     }
@@ -414,7 +565,7 @@ public final class Float256 extends Number implements Comparable<Float256> {
         // 用 long[6]（384 bit）小端累加器 + 专用 roundAndPackMul（GRS 舍入）
         Int256 M1 = mantissaWithImplied();
         Int256 M2 = o.mantissaWithImplied();
-        long[] x = {M1.d, M1.c, M1.b};   // 小端 3 limb（隐含位在 M1.b bit48）
+        long[] x = {M1.d, M1.c, M1.b}; // 小端 3 limb（隐含位在 M1.b bit48）
         long[] y = {M2.d, M2.c, M2.b};
         long[] r = new long[6];
         for (int i = 0; i < 3; i++) {
@@ -483,8 +634,10 @@ public final class Float256 extends Number implements Comparable<Float256> {
         return out;
     }
 
-    /** 乘积舍入打包：r（小端 384-bit）→ Float256，RN 向偶。
-     *  🔧 exp' = E_in + shift - MANT_BITS（乘积是 352/353 bit 隐含位基数，需减 176 补偿） */
+    /**
+     * 乘积舍入打包：r（小端 384-bit）→ Float256，RN 向偶。 🔧 exp' = E_in + shift - MANT_BITS（乘积是 352/353 bit
+     * 隐含位基数，需减 176 补偿）
+     */
     private static Float256 roundAndPackMul(long[] r, long expHi, long expLo, int sign) {
         int bitLen = 0;
         for (int i = 5; i >= 0; i--) {
@@ -510,15 +663,23 @@ public final class Float256 extends Number implements Comparable<Float256> {
         if (increment) {
             m[0] += 1;
             boolean carry = m[0] == 0;
-            if (carry) { m[1] += 1; carry = m[1] == 0; }
-            if (carry) { m[2] += 1; }
+            if (carry) {
+                m[1] += 1;
+                carry = m[1] == 0;
+            }
+            if (carry) {
+                m[2] += 1;
+            }
             // 舍入进位使 mantissa 变 2^177 → 右移 1 位，指数 +1
             if ((m[2] & 0x0002_0000_0000_0000L) != 0L) { // bit177 set
                 m[2] = (m[2] >>> 1) | (m[1] << 63);
                 m[1] = (m[1] >>> 1) | (m[0] << 63);
                 m[0] >>>= 1;
                 expLo++;
-                if (expLo > 0xFFFF) { expLo = 0; expHi++; }
+                if (expLo > 0xFFFF) {
+                    expLo = 0;
+                    expHi++;
+                }
             }
         }
         // exp 上溢 → Inf
@@ -601,9 +762,9 @@ public final class Float256 extends Number implements Comparable<Float256> {
         if (signum() < 0) throw new IllegalArgumentException("UFloat256 cannot be negative");
         // 指数 re-bias: e_uf = e_f - (2^78 - 2^63)，2^78-2^63 = 0x3FFF_8000_0000_0000_0000
         long hi = expHi() - 0x3FFF_8000_0000_0000L; // 常数高 63 位
-        if (hi < 0) return UFloat256.ZERO;           // 指数过小 → 0
+        if (hi < 0) return UFloat256.ZERO; // 指数过小 → 0
         if (hi > 0xFFFF_FFFF_FFFFL) return UFloat256.INF; // e_uf ≥ 2^64
-        long euf = (hi << 16) | expLo();             // 64-bit 无符号
+        long euf = (hi << 16) | expLo(); // 64-bit 无符号
         // 尾数 176 → 192：左移 16 bit 零损失扩充
         long mHi = (mantHi() << 16) | (mantMid() >>> 48);
         long mMid = (mantMid() << 16) | (mantLo() >>> 48);
@@ -612,13 +773,41 @@ public final class Float256 extends Number implements Comparable<Float256> {
     }
 
     // ═════════ 平方根 ═════════
+    /** 平方根（高精度）。 修复：原实现 of(Math.sqrt(doubleValue())) 精度只有 53 bit。 */
     public Float256 sqrt() {
-        if (signum() < 0) return NaN;
-        if (isZero()) return ZERO;
         if (isNaN()) return NaN;
+        if (isZero()) return ZERO;
+        if (signum() < 0) return NaN;
         if (isInfinity()) return POS_INF;
-        // double 近似起步（对坐标运算足够）
-        return of(Math.sqrt(doubleValue()));
+
+        // value = M × 2^e，M 是 177 位（隐含位在 bit176），e = realExponent - 176
+        long e = realExponent() - MANT_BITS;
+        Int256 M = mantissaWithImplied();
+
+        // 保证 e 为偶数
+        if ((e & 1L) != 0) {
+            M = M.shiftLeft(1);
+            e -= 1;
+        }
+
+        // 为提高精度，M 左移 2k 位，sqrt(M × 2^2k) = sqrt(M) × 2^k
+        final int k = 90;
+        BigInteger M2 = M.toBigInteger().shiftLeft(2 * k);
+        BigInteger s = M2.sqrt(); // ≈ sqrt(M) × 2^k，约 178 位
+
+        // 结果 = s × 2^(e/2 - k)
+        // 用尾数 s 和指数 E 调 roundAndPack，使 s × 2^(E - BIAS - 176) = s × 2^(e/2 - k)
+        // 即 E = BIAS + 176 + e/2 - k
+        long offset = 176L + e / 2 - k;
+        long offLo = offset & 0xFFFFL;
+        long offHi = offset >> 16;
+        long eLo = (BIAS_LO + offLo) & 0xFFFFL;
+        long eHi = BIAS_HI + offHi + ((BIAS_LO + offLo) >>> 16);
+
+        if (eHi < 0) return ZERO;
+        if (eHi > EXP_ALL_HI || (eHi == EXP_ALL_HI && eLo >= EXP_ALL_LO)) return POS_INF;
+
+        return roundAndPack(eHi, eLo, Int256.of(s), 1);
     }
 
     // ═════════ 比较 ═════════
@@ -626,7 +815,8 @@ public final class Float256 extends Number implements Comparable<Float256> {
     public int compareTo(Float256 o) {
         if (isNaN() || o.isNaN()) return 0;
         if (isZero() && o.isZero()) return 0;
-        if (isInfinity() && o.isInfinity()) return signum() < 0 ? (o.signum() < 0 ? 0 : -1) : (o.signum() < 0 ? 1 : 0);
+        if (isInfinity() && o.isInfinity())
+            return signum() < 0 ? (o.signum() < 0 ? 0 : -1) : (o.signum() < 0 ? 1 : 0);
         if (isInfinity()) return signum() < 0 ? -1 : 1;
         if (o.isInfinity()) return o.signum() < 0 ? 1 : -1;
         if (signum() != o.signum()) return signum() < 0 ? -1 : 1;
@@ -654,10 +844,10 @@ public final class Float256 extends Number implements Comparable<Float256> {
     public long longValue() {
         if (isZero()) return 0;
         if (isNaN() || isInfinity()) throw new ArithmeticException("not finite");
-        // 🔧 修复：值 = mant × 2^(realExp - 176)，需右移 (176 - realExp) 位（原实现漏减 MANT_BITS）
         long realExp = realExponent();
+        // long 有效范围 [-2^63, 2^63-1]，指数 ≥ 63 就一定超
+        if (realExp >= 63) throw new ArithmeticException("Float256 out of long range");
         if (realExp < 0) return 0;
-        if (realExp >= MANT_BITS) throw new ArithmeticException("Float256 out of long range");
         Int256 shifted = mantissaWithImplied().shiftRight((int) (MANT_BITS - realExp));
         long result = shifted.longValue();
         return signum() < 0 ? -result : result;
@@ -673,25 +863,31 @@ public final class Float256 extends Number implements Comparable<Float256> {
         return (float) doubleValue();
     }
 
+/** 精确十进制转换（不做有效位数截断）。 修复：原实现 realExp<0 时用 MathContext.DECIMAL128，每次转换丢约 19 位有效数字。 */
     public BigDecimal toBigDecimal() {
         if (isZero()) return BigDecimal.ZERO;
         if (isNaN() || isInfinity()) throw new ArithmeticException("not finite");
         BigInteger mant = mantissaWithImplied().toBigInteger();
-        // 🔧 修复：realExp 需减 MANT_BITS（mant 含 2^176 基数，值 = mant × 2^(realExp-176)）
-        long realExp = realExponent() - MANT_BITS;
-        BigDecimal dec = new BigDecimal(mant, 0);
-        if (realExp > 0) {
-            if (realExp < 1024) {
-                dec = dec.multiply(BigDecimal.valueOf(Math.pow(2, realExp)));
-            } else {
-                dec = dec.scaleByPowerOfTen((int) (realExp * 0.3010299956639812));
+        long realExp = realExponent() - MANT_BITS; // 值 = mant × 2^realExp
+
+        BigDecimal dec;
+        if (realExp == 0) {
+            dec = new BigDecimal(mant, 0);
+        } else if (realExp > 0) {
+            // 值 = mant × 2^realExp，直接左移构造精确分子
+            if (realExp > Integer.MAX_VALUE) {
+                throw new ArithmeticException("Float256 exponent too large for BigDecimal");
             }
-        } else if (realExp < 0) {
-            if (realExp > -1024) {
-                dec = dec.divide(BigDecimal.valueOf(Math.pow(2, -realExp)), MathContext.DECIMAL128);
-            } else {
-                dec = dec.scaleByPowerOfTen((int) (realExp * 0.3010299956639812));
+            BigInteger scaled = mant.shiftLeft((int) realExp);
+            dec = new BigDecimal(scaled, 0);
+        } else {
+            // realExp < 0：值 = mant / 2^|realExp|，用 BigInteger 移位构造分母，不截断
+            long negExp = -realExp;
+            if (negExp > Integer.MAX_VALUE) {
+                throw new ArithmeticException("Float256 exponent too small for BigDecimal");
             }
+            BigInteger denom = BigInteger.ONE.shiftLeft((int) negExp);
+            dec = new BigDecimal(mant).divide(new BigDecimal(denom), MathContext.UNLIMITED);
         }
         return signum() < 0 ? dec.negate() : dec;
     }
@@ -746,7 +942,8 @@ public final class Float256 extends Number implements Comparable<Float256> {
     }
 
     /** 绝对值截断（内部用） */
-    // 🔧 修复：值 = mant × 2^(realExp - 176)。realExp ≥ 176 左移(realExp-176)，0≤realExp<176 右移(176-realExp)，<0 归 0
+    // 🔧 修复：值 = mant × 2^(realExp - 176)。realExp ≥ 176 左移(realExp-176)，0≤realExp<176
+    // 右移(176-realExp)，<0 归 0
     private Int256 truncateAbs() {
         long realExp = realExponent();
         Int256 mant = mantissaWithImplied();
@@ -759,9 +956,8 @@ public final class Float256 extends Number implements Comparable<Float256> {
     }
 
     /**
-     * 精确十进制展开：值 = mant × 2^e → mant × 5^(-e) / 10^(-e)
-     * 完整保留 53-bit double 尾数（0.1 → 0.1000000000000000055511151231257827021181583404541015625）
-     * 用于调试屏幕坐标显示，尽量减少精度损失
+     * 精确十进制展开：值 = mant × 2^e → mant × 5^(-e) / 10^(-e) 完整保留 53-bit double 尾数（0.1 →
+     * 0.1000000000000000055511151231257827021181583404541015625） 用于调试屏幕坐标显示，尽量减少精度损失
      */
     public String toExactString() {
         if (isZero()) return "0";

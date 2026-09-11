@@ -9,8 +9,8 @@ import java.util.Objects;
 /**
  * Int256 — 有符号 256-bit 整数（补码）
  *
- * <p>内部: long[4] = {a, b, c, d} = {bits 255..192, 191..128, 127..64, 63..0}，最高位 = 符号
- * 范围: [-2^255, 2^255 - 1] 零 GC，全 long 运算，无 BigInteger 依赖（除 toString）
+ * <p>内部: long[4] = {a, b, c, d} = {bits 255..192, 191..128, 127..64, 63..0}，最高位 = 符号 范围: [-2^255,
+ * 2^255 - 1] 零 GC，全 long 运算，无 BigInteger 依赖（除 toString）
  *
  * <p>INF32768 / MCRe NoiseFarlands 项目
  */
@@ -39,8 +39,10 @@ public final class Int256 extends Number implements Comparable<Int256> {
     public static final Int256 TEN = new Int256(0L, 0L, 0L, 10L);
     public static final Int256 MINUS_ONE = new Int256(-1L, -1L, -1L, -1L);
     public static final Int256 NEG_ONE = MINUS_ONE;
+
     /** 最大值 2^255 - 1 */
     public static final Int256 MAX_VALUE = new Int256(0x7FFF_FFFF_FFFF_FFFFL, -1L, -1L, -1L);
+
     /** 最小值 -2^255 */
     public static final Int256 MIN_VALUE = new Int256(0x8000_0000_0000_0000L, 0L, 0L, 0L);
 
@@ -105,15 +107,26 @@ public final class Int256 extends Number implements Comparable<Int256> {
     public static Int256 of(byte[] bytes) {
         if (bytes.length != 32) throw new IllegalArgumentException("need 32 bytes");
         return new Int256(aggregate(bytes, 0), aggregate(bytes, 8),
-                aggregate(bytes, 16), aggregate(bytes, 24));
+        aggregate(bytes, 16), aggregate(bytes, 24));
     }
 
-    /** 从 BigInteger（取低 256 位，符号扩展） */
+    /**
+     * 从 BigInteger（取低 256 位，符号扩展）。 修复：原实现对 bit255=1 的正数会错误地变成负数。Int256 有符号上限是 2^255-1，
+     * 超过必须抛异常而不是静默回绕。
+     */
     public static Int256 of(BigInteger value) {
-        // 🔧 MCRe：long 范围快路径——bitLength()≤63 必在 long 内（含负数补码），走小值缓存/直接填充
         if (value.bitLength() <= 63) {
             return of(value.longValue());
         }
+        // 有符号上限 2^255 - 1
+        if (value.signum() > 0 && value.bitLength() > 255) {
+            throw new ArithmeticException("Int256 overflow: " + value.bitLength() + " bits > 255");
+        }
+        if (value.signum() < 0 && value.bitLength() > 256) {
+            // 负下限 -2^255，bitLength() 对负数返回 ~x 的位数，等于 256 时是 -2^255 恰好合法
+            throw new ArithmeticException("Int256 underflow: " + value.bitLength() + " bits");
+        }
+
         byte[] mag = value.toByteArray();
         byte[] buf = new byte[32];
         if (mag.length >= 32) {
@@ -165,7 +178,7 @@ public final class Int256 extends Number implements Comparable<Int256> {
     public Int256 multiply(Int256 o) {
         // 4×4 无符号 limb 乘法 → 512-bit 中间结果（小端 r[0..7]），取低 256 bit。
         // 补码乘法的低 256 bit 与无符号乘法一致，天然正确。
-        long[] x = {d, c, b, a};   // 小端
+        long[] x = {d, c, b, a}; // 小端
         long[] y = {o.d, o.c, o.b, o.a};
         long[] r = new long[8];
         for (int i = 0; i < 4; i++) {
@@ -393,10 +406,7 @@ public final class Int256 extends Number implements Comparable<Int256> {
         return -1;
     }
 
-    /**
-     * 补码表示中除去符号位所需的位数（BigInteger.bitLength 语义）
-     * 正数: 最高有效位位置 + 1；负数: 最高 0 位位置 + 1；0: 0
-     */
+    /** 补码表示中除去符号位所需的位数（BigInteger.bitLength 语义） 正数: 最高有效位位置 + 1；负数: 最高 0 位位置 + 1；0: 0 */
     public int bitLength() {
         if (a == 0 && b == 0 && c == 0 && d == 0) return 0;
         if (!isNegative()) {

@@ -132,28 +132,22 @@ final class BitSieve {
 
         for (int i = 0; i < bits.length; i++) {
             long word = bits[i];
-            long candidates = ~word; // 1 = 候选（未筛）
+            long candidates = ~word;
+            long wordEndOffset = 1L + (long) (i + 1) * 128L; // 该 word 最后一位之后的偏移
 
             while (candidates != 0) {
-                // 🔥 关键优化：跳过连续 0
                 int tz = Long.numberOfTrailingZeros(candidates);
                 if (tz > 0) {
-                    offset += (long) tz * 2; // 每个 index → offset += 2
+                    offset += (long) tz * 2;
                     candidates >>>= tz;
                 }
-
-                // 此时 candidates[0] == 1，即当前 offset 是候选
                 BigInteger candidate = initValue.add(cachedValueOf(offset));
                 if (candidate.primeToCertainty(certainty, random))
                     return candidate;
-
-                // 下一个
                 candidates >>>= 1;
                 offset += 2;
             }
-
-            // 这个 word 全部被筛，offset 跨越剩余位置
-            offset += 128; // 64 bits * 2
+            offset = wordEndOffset; // 直接跳到下一个 word 起点
         }
         return null;
     }
