@@ -1,3 +1,5 @@
+![Logo](/docs/images/MCRe-NoiseFarlandsJava-Logo.png)
+
 # MCRe-NoiseFarlandsJava
 > 基于 Minecraft Java 版未混淆版本构建的边境之地 Mod  
 > 源码来源于 [Hexeption/MCP-Reborn](https://github.com/Hexeption/MCP-Reborn/)  
@@ -66,7 +68,7 @@ cd MCRe-NoiseFarlandsJava
 - [X] 修复 33554432 问题
 - [X] 解决 世界边界/界限 限制，参考 [INF32768/UltimateScaler](https://github.com/INF32768/UltimateScaler)
 - [ ] 突破32位整数限制
-- [ ] 加入缩放，偏移等一系列功能，参考同上
+- [X] 加入缩放，偏移等一系列功能，参考同上
 - [X] 加入世界的自定义设置 (参考 [边境旅者 SmallmanSeries/FarLandsTraveler](https://github.com/SmallmanSeries/FarLandsTraveler))
    - 重构排版，使其看起来更美观，并加入滚动面板以支持更多的设置
    - 天空网格的开关控件
@@ -77,14 +79,7 @@ cd MCRe-NoiseFarlandsJava
    - 高版本的 渐进式边境之地
    - 即将到来: 重构设置页面，加入换页功能，并加入适配新版本的 [自定义世界类型](https://zh.minecraft.wiki/w/%E8%87%AA%E5%AE%9A%E4%B9%89/Java%E7%89%881.13%E5%89%8D)
 - [ ] 将部分在常规无法开启的调试环境 / 内部开关使用 [调试工具](https://zh.minecraft.wiki/w/%E8%B0%83%E8%AF%95%E5%B7%A5%E5%85%B7) 控制
-- [ ] 加入该改版仓库的 Wiki 页面，参考 [INF32768/UltimateScaler](https://github.com/INF32768/UltimateScaler)
-
-## 项目状态
-此列表从 **2026-08-17 01:06** 开始记录。
-| 时间       | 主要修改内容                 | 修改内容详细信息                                                                 | 状态       |
-|------------|------------------------------|----------------------------------------------------------------------------------|------------|
-| 2026-08-17 01:06| 重构了项目部分内容，例如Json和半自动上传等         | 为项目添加了 `MainProjectCatalogue` 文件夹，用于将 Github 半自动化使用的文件和工具上传到这个文件夹进行分类，便于进行更清晰的 Minecraft 改造           | ✅ 已合并   |
-| 2026-08-17 01:12| 在 Readme 中添加了项目状态列表         | 无           | ✅ 已合并   |
+- [X] 加入该改版仓库的 Wiki 页面，参考 [终极缩放器 INF32768/UltimateScaler](https://github.com/INF32768/UltimateScaler)
 
 ## 许可证
 本项目依据 GNU General Public License 协议开源，详见 [LICENSE](./LICENSE) 文件

@@ -440,15 +440,28 @@ public class WorldMainSettingScreen extends Screen {
         ));
         this.scrollContent.addChild(yGradientBuilder.build().layout(), s -> s.paddingHorizontal(10));
 
+        // ========== 第三节追加：禁用 Offset 噪声（NoOffset 数据包移植）==========
+        // 🔧 MCRe：禁用 ShiftedNoise 的 shift_x/y/z 偏移——解决渐消之地地形消失
+        SwitchGrid.Builder disableOffsetBuilder = SwitchGrid.builder(CONTENT_WIDTH - 20)
+                .withRowSpacing(4);
+        disableOffsetBuilder.addSwitch(
+                Component.literal("禁用 Offset 噪声"),
+                () -> this.configData.disableOffsetNoise,
+                val -> this.configData.disableOffsetNoise = val
+        ).withInfo(Component.literal(
+                "此开关用于禁用噪声 Offset，可以用来解决渐消之地导致的地形消失，\\n"
+                        + "展现渐消之后更多的边境层"
+        ));
+        this.scrollContent.addChild(disableOffsetBuilder.build().layout(), s -> s.paddingHorizontal(10));
+
         // ========== 第四节：流体替换 ==========
         // 🔧 MCRe：UltimateScaler FluidReplace 移植——玩家可自定义海平面流体 + 地底熔岩
-        // 每个开关下方紧跟对应方块 ID 输入框（开关关闭时输入框隐藏）
+        // 每个开关单独一行 + 下方紧跟对应输入框（开关关闭时输入框隐藏）
         this.scrollContent.addChild(this.createSectionHeader(
                 Component.literal("§a§l含水层与岩浆层")
         ));
 
-        // 组 1：替换默认流体（按钮 + 下方输入框）
-        LinearLayout fluidReplaceGroup1 = LinearLayout.vertical().spacing(2);
+        // 开关 1：替换默认流体 + 下方输入框
         SwitchGrid.Builder fluidReplaceBuilder1 = SwitchGrid.builder(CONTENT_WIDTH - 20)
                 .withRowSpacing(4);
         fluidReplaceBuilder1.addSwitch(
@@ -463,17 +476,16 @@ public class WorldMainSettingScreen extends Screen {
                         + "§e典型用途：§r把海变成空气（minecraft:air）或自定义流体\n"
                         + "§c[警告] §r方块 ID 必须合法（namespace:path 格式），否则回退到默认流体"
         ));
-        fluidReplaceGroup1.addChild(fluidReplaceBuilder1.build().layout());
+        this.scrollContent.addChild(fluidReplaceBuilder1.build().layout(), s -> s.paddingHorizontal(10));
+
         this.replaceDefaultFluidBlockInput = this.createStringInput(
                 Component.literal("默认流体方块 ID（namespace:path）"),
                 this.configData.replaceDefaultFluidBlock,
                 val -> this.configData.replaceDefaultFluidBlock = val
         );
-        fluidReplaceGroup1.addChild(this.replaceDefaultFluidBlockInput);
-        this.scrollContent.addChild(fluidReplaceGroup1, s -> s.paddingHorizontal(10));
+        this.scrollContent.addChild(this.replaceDefaultFluidBlockInput, s -> s.paddingHorizontal(10));
 
-        // 组 2：替换地底熔岩（按钮 + 下方输入框）
-        LinearLayout fluidReplaceGroup2 = LinearLayout.vertical().spacing(2);
+        // 开关 2：替换地底熔岩 + 下方输入框
         SwitchGrid.Builder fluidReplaceBuilder2 = SwitchGrid.builder(CONTENT_WIDTH - 20)
                 .withRowSpacing(4);
         fluidReplaceBuilder2.addSwitch(
@@ -488,14 +500,14 @@ public class WorldMainSettingScreen extends Screen {
                         + "§e典型用途：§r把地下熔岩变成空气（避免误伤）或自定义方块\n"
                         + "§c[警告] §r方块 ID 必须合法（namespace:path 格式），否则回退到熔岩"
         ));
-        fluidReplaceGroup2.addChild(fluidReplaceBuilder2.build().layout());
+        this.scrollContent.addChild(fluidReplaceBuilder2.build().layout(), s -> s.paddingHorizontal(10));
+
         this.replaceUndergroundLavaBlockInput = this.createStringInput(
                 Component.literal("地底熔岩方块 ID（namespace:path）"),
                 this.configData.replaceUndergroundLavaBlock,
                 val -> this.configData.replaceUndergroundLavaBlock = val
         );
-        fluidReplaceGroup2.addChild(this.replaceUndergroundLavaBlockInput);
-        this.scrollContent.addChild(fluidReplaceGroup2, s -> s.paddingHorizontal(10));
+        this.scrollContent.addChild(this.replaceUndergroundLavaBlockInput, s -> s.paddingHorizontal(10));
 
         // 根据开关状态初始化输入框显隐（页面切换后重新构建时生效）
         this.setScalerInputsVisible(this.configData.enabledTerrainScaler);
@@ -503,9 +515,6 @@ public class WorldMainSettingScreen extends Screen {
         this.setFluidReplaceInputsVisible();
     }
 
-    // ============ 第二页 helper：联动显隐 ============
-
-    /** 🔧 MCRe：缩放开关 → 三个 X/Y/Z 输入框同步显隐（仿第一页「限制返回值」联动模式） */
     private void setScalerInputsVisible(final boolean visible) {
         final int h = visible ? 20 : 0;
         if (this.xWorldScalerInput != null) {
@@ -542,15 +551,14 @@ public class WorldMainSettingScreen extends Screen {
     }
 
     /**
-     * 🔧 MCRe：创建 BigDecimal 输入框——高度 20、宽度 = CONTENT_WIDTH 占满滚动面板，
-     * 支持科学记数法 e/E（自研 BigDecimal 构造器原生支持）。
-     * responder 自动用 BigDecimal 构造器校验格式，非法输入静默丢弃（保留旧值）。
+     * 🔧 MCRe：创建 BigDecimal 输入框——高度 20、宽度 = CONTENT_WIDTH 占满滚动面板， 支持科学记数法 e/E（自研 BigDecimal
+     * 构造器原生支持）。 responder 自动用 BigDecimal 构造器校验格式，非法输入静默丢弃（保留旧值）。
      */
     private BigDecimalEditBox createBigDecimalInput(
-            final Component narration, final String initialValue, final Consumer<String> onValidValue
-    ) {
+            final Component narration, final String initialValue, final Consumer<
+                    String> onValidValue) {
         final BigDecimalEditBox box = new BigDecimalEditBox(
-                this.font, 0, 0, CONTENT_WIDTH, 20, narration
+        this.font, 0, 0, CONTENT_WIDTH, 20, narration
         );
         box.setValue(initialValue);
         box.setResponder(val -> {
@@ -570,11 +578,12 @@ public class WorldMainSettingScreen extends Screen {
     }
 
     /**
-     * 🔧 MCRe：通用字符串输入框——不限字符集（用于方块 ID "namespace:path" 等），
-     * 移除 EditBox 默认 maxLength=32 限制，setResponder 直接写原值到 configData。
-     * 运行时解析失败由调用方处理（如 {@code BuiltInRegistries.BLOCK.getOptional} 返回空时回退）。
+     * 🔧 MCRe：通用字符串输入框——不限字符集（用于方块 ID "namespace:path" 等）， 移除 EditBox 默认 maxLength=32
+     * 限制，setResponder 直接写原值到 configData。 运行时解析失败由调用方处理（如 {@code
+     * BuiltInRegistries.BLOCK.getOptional} 返回空时回退）。
      */
-    private EditBox createStringInput(final Component narration, final String initialValue, final Consumer<String> onValueChange) {
+    private EditBox createStringInput(final Component narration, final String initialValue, final Consumer<
+                    String> onValueChange) {
         final EditBox box = new EditBox(this.font, 0, 0, CONTENT_WIDTH, 20, narration);
         box.setMaxLength(Integer.MAX_VALUE);
         box.setValue(initialValue);
@@ -797,6 +806,10 @@ public class WorldMainSettingScreen extends Screen {
         // 原因：YClampedGradient 控制 Y 轴 base stone 海拔梯度，偏移后 Y 轴边境之地特征会消失。
         public boolean enabledYClampedGradientOffset = false;
 
+        // 🔧 MCRe：禁用 Offset 噪声（NoOffset 数据包移植）——禁用 ShiftedNoise 的 shift_x/y/z 偏移
+        // 用于解决渐消之地地形消失，展现渐消之后更多的边境层
+        public boolean disableOffsetNoise = false;
+
         /** 当前活动的 FarLands 配置，由 WorldMainSettingScreen.onDone() 写入 */
         public static FarLandsConfigData activeConfig = new FarLandsConfigData();
     }
@@ -852,9 +865,8 @@ public class WorldMainSettingScreen extends Screen {
     }
 
     /**
-     * 🔧 MCRe：BigDecimal 专用输入框——支持科学记数法 e/E。
-     * 解析路径：String → BigDecimal（自研 DynamicAccuracy 库构造器原生支持 e/E）→ WorldReposition.parseOrFallback。
-     * 非法输入（如 "1e"、"1e10.5"、".e5"）在 responder 端用 BigDecimal
+     * 🔧 MCRe：BigDecimal 专用输入框——支持科学记数法 e/E。 解析路径：String → BigDecimal（自研 DynamicAccuracy 库构造器原生支持
+     * e/E）→ WorldReposition.parseOrFallback。 非法输入（如 "1e"、"1e10.5"、".e5"）在 responder 端用 BigDecimal
      * 构造器校验后静默丢弃，保留旧值。
      */
     private static class BigDecimalEditBox extends EditBox {
@@ -892,7 +904,8 @@ public class WorldMainSettingScreen extends Screen {
                     eSeen = true;
                 } else if (ch == '-' || ch == '+') {
                     // 符号只能出现在开头或 e/E 后
-                    if (i != 0 && candidate.charAt(i - 1) != 'e' && candidate.charAt(i - 1) != 'E') return false;
+                    if (i != 0 && candidate.charAt(i - 1) != 'e' && candidate.charAt(i - 1) != 'E')
+                        return false;
                 } else {
                     return false; // 非法字符
                 }

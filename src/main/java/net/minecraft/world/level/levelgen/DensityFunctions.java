@@ -1295,9 +1295,15 @@ public final class DensityFunctions {
         @Override
         public double compute(final DensityFunction.FunctionContext context) {
             // 🔧 MCRe：先施加 WorldReposition 偏移，再乘 xzScale/yScale，最后加 shiftX/Y/Z（数据包定义的偏移）
-            final double x = WorldReposition.reposition(context.blockX(), Direction.Axis.X) * this.xzScale + this.shiftX.compute(context);
-            final double y = WorldReposition.reposition(context.blockY(), Direction.Axis.Y) * this.yScale + this.shiftY.compute(context);
-            final double z = WorldReposition.reposition(context.blockZ(), Direction.Axis.Z) * this.xzScale + this.shiftZ.compute(context);
+            // 禁用 Offset 噪声开关开启时，跳过 shiftX/Y/Z 偏移（等同于 NoOffset 数据包将 shift_x/y/z 设为 constant(0)）
+            final boolean disableOffset = WorldMainSettingScreen.FarLandsConfigData.activeConfig != null
+                    && WorldMainSettingScreen.FarLandsConfigData.activeConfig.disableOffsetNoise;
+            final double x = WorldReposition.reposition(context.blockX(), Direction.Axis.X) * this.xzScale
+                    + (disableOffset ? 0.0 : this.shiftX.compute(context));
+            final double y = WorldReposition.reposition(context.blockY(), Direction.Axis.Y) * this.yScale
+                    + (disableOffset ? 0.0 : this.shiftY.compute(context));
+            final double z = WorldReposition.reposition(context.blockZ(), Direction.Axis.Z) * this.xzScale
+                    + (disableOffset ? 0.0 : this.shiftZ.compute(context));
             return this.noise.getValue(x, y, z);
         }
 
